@@ -1,6 +1,11 @@
 import tensorflow as tf
-
+from tensorflow.examples.tutorials.mnist import input_data as in_mnist
+import numpy as np
 import os
+from configuration import DsParams
+import struct
+from matplotlib import pyplot as plt
+from scipy.misc import imsave, imshow
 
 # Process images of this size. Note that this differs from the original CIFAR
 # image size of 32 x 32. If one alters this number, then the entire model
@@ -11,6 +16,118 @@ IMAGE_SIZE = 24
 NUM_CLASSES = 10
 NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 50000
 NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = 10000
+
+def load_mnist(combine=False, specific_targets=None, sub_n=None, feed_forward=False):
+    """Load the MNIST data, and data set params
+    
+    :param combine - If true will will return S = train U test U validation,
+    (or a sample of S if sub_n is specified) otherwise will return train,
+    (or sample of train)
+    
+    :param specific_targets - If specified, draw images which are only of the
+    classes in this list
+    
+    :param sub_n - If specified, will return a sample of the constructed data set.
+     
+    :return The data set to be used for training, and the parameters
+    associated with it.
+    """
+    mnist = in_mnist.read_data_sets('MNIST_data', one_hot=False)
+    images = mnist.train.images
+    labels = mnist.train.labels
+
+    # Combine test, training and val (if combine is true)
+    if combine:
+        test = mnist.test
+        vald = mnist.validation
+        images = np.concatenate((images, test.images, vald.images), axis=0)
+        labels = np.concatenate((labels, test.labels, vald.labels))
+
+    images, labels, n = _select_data(images, labels, specific_targets, sub_n)
+
+    #Build DsParams object
+    dsParams = DsParams(n, 28, 28, 1)
+    if feed_forward:
+        return images, labels, dsParams
+    return images.reshape(n, 28, 28, 1), labels, dsParams
+
+def load_single_cifar_10_file(filenames, specific_targets=None, sub_n=None):
+    #CIFAR 10 data set properties
+    im_height = 32
+    im_width = 32
+    c_dim = 3
+    num_bytes = im_height * im_width * c_dim
+    n = 10000
+
+    #Load raw data and split into labels and images
+    all_bytes = []
+    for filename in filenames:
+        all_byte = np.fromfile(filename, 'uint8')
+        all_byte = all_byte.reshape(n, num_bytes + 1)
+        all_bytes.append(all_byte)
+    all_byte = np.concatenate(all_bytes, axis=0)
+    labels = all_byte[:, 0]
+    images = all_byte[:, 1:]
+    images, labels, n = _select_data(images, labels, specific_targets, sub_n)
+
+    #Arrange images according to the networks layout
+    images = images.reshape(n, c_dim, im_height, im_width)
+    images = images.transpose([0,2,3,1])
+    im_int = images
+
+    #Standardize each image individually
+    images = images.astype(np.float32)
+    max = np.max(images)
+    min = np.min(images)
+    # maxes = images.max(axis=(1, 2, 3)).reshape(n, 1, 1, 1)
+    # mins = images.min(axis=(1, 2, 3)).reshape(n, 1, 1, 1)
+    pix_range = max - min
+    images = (images - min) / pix_range
+
+
+    # im_means = np.mean(images, axis=(1,2,3)).reshape(n,1,1,1)
+    # sds = (1.0/float(num_bytes)*np.sum((images - im_means) ** 2.0, axis=(1,2,3))) ** 0.5
+    # sds = sds.reshape(n,1,1,1)
+    # images = (images - im_means) / sds
+
+    # Build DsParams object
+    ds_params = DsParams(n, im_height, im_width, c_dim)
+    return images, labels, ds_params
+
+def _save_image(image, filename):
+    #image = _inverse_transform(im_net)
+    imshow(image)
+    #imsave(filename, image)
+
+def _inverse_transform(im_net, filename):
+  return (im_net+1.0)/2.0
+
+
+def _select_data(images, labels, specific_targets, sub_n):
+    n = images.shape[0]
+    indices = np.arange(0, n)
+
+    # If specifed, draw only those indices from specific classes
+    if specific_targets is not None:
+        indices = []
+        # TODO make more pythonic
+        for i in xrange(n):
+            if labels[i] in specific_targets:
+                indices.append(i)
+        n = len(indices)
+        indices = np.array(indices)
+
+    # Take random sample of size sub_n (if specified)
+    if sub_n is not None:
+        indices = np.random.choice(indices, size=sub_n, replace=False)
+        n = sub_n
+
+    images = images[indices]
+    labels = labels[indices]
+
+    return images, labels, n
+
+
 
 class ReaderWriter:
 
@@ -95,7 +212,7 @@ def inputs(data_dir, batch_size):
     # Generate a batch of images and labels by building up a queue of examples.
     return _generate_image_and_label_batch(ID, float_image, label,
                                            min_queue_examples, batch_size,
-                                           shuffle=False)
+                                           shuffle=True)
 
 def _generate_image_and_label_batch(ID, image, label, min_queue_examples,
                                         batch_size, shuffle):
@@ -155,7 +272,7 @@ def read_cifar10(filename_queue):
     # Dimensions of the images in the CIFAR-10 dataset.
     # See http://www.cs.toronto.edu/~kriz/cifar.html for a description of the
     # input format.
-    id_bytes = 2
+    id_bytes = 4
     label_bytes = 1  # 2 for CIFAR-100
     height = 32
     width = 32
