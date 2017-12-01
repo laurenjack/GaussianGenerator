@@ -4,6 +4,10 @@ import data_loader as dl
 import numpy as np
 from tensorflow.python import debug as tf_debug
 
+import sys
+print '\n'.join(sys.path)
+
+
 # import sys
 # sys.path.insert(1, "/home/laurenjack/PycharmProjects/ModularNN")
 # sys.path.append("/home/laurenjack/PycharmProjects/ModularNN/data")
